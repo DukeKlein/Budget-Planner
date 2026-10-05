@@ -3,7 +3,15 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Where My Pay Goes – Monthly Budget Planner</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#12332d">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Budget Buddy">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<title>Budget Buddy – Monthly Budget Planner</title>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;800&family=Figtree:wght@400;600&display=swap" rel="stylesheet">
 <style>
 :root{--bg:#eef3f0;--card:#fff;--ink:#12332d;--mute:#5d746e;--line:#d5e0db;--needs:#1f8a70;--wants:#5b3e8c;--save:#d99a12;--over:#d8452b;
@@ -69,9 +77,26 @@ button.x:hover{color:var(--over)}
 .gadd input{flex:1;max-width:170px}
 button.sm{background:none;border:1px solid var(--line);border-radius:10px;padding:8px 12px;cursor:pointer}
 @media (prefers-reduced-motion:reduce){.bar span{transition:none}}
+/* Opening screen: only shown in the installed app (or when the link ends in ?splash), fades out by itself */
+#splash{display:none}
+html.splash #splash{position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:#12332d;color:#e6f1ed;animation:splashOut .4s ease 1.3s forwards}
+#splash svg{width:84px;height:84px}
+#splash .dk{position:absolute;left:0;right:0;bottom:calc(40px + env(safe-area-inset-bottom,0px));text-align:center;font-weight:700;font-size:14px;line-height:1;letter-spacing:.22em;padding-left:.22em;opacity:.85}
+#splash .spin{width:18px;height:18px;margin-top:10px;border:2px solid rgba(230,241,237,.25);border-top-color:#3fbf9d;border-radius:50%;animation:splashSpin .8s linear infinite}
+@keyframes splashSpin{to{transform:rotate(360deg)}}
+@keyframes splashOut{to{opacity:0;visibility:hidden}}
+@media (prefers-reduced-motion:reduce){#splash .spin{animation:none}}
 </style>
+<script>
+try{if(window.matchMedia('(display-mode: standalone)').matches||navigator.standalone||/[?&]splash\b/.test(location.search))document.documentElement.classList.add('splash')}catch(e){}
+</script>
 </head>
 <body>
+<div id="splash" aria-hidden="true">
+  <svg viewBox="0 0 100 100"><g transform="rotate(-90 50 50)" fill="none" stroke-width="20"><circle cx="50" cy="50" r="32" stroke="#3fbf9d" stroke-dasharray="99.3 201.06"/><circle cx="50" cy="50" r="32" stroke="#a58ae0" stroke-dasharray="59.1 201.06" stroke-dashoffset="-100.53"/><circle cx="50" cy="50" r="32" stroke="#f2c14e" stroke-dasharray="39 201.06" stroke-dashoffset="-160.85"/></g></svg>
+  <div class="dk">DK</div>
+  <div class="spin"></div>
+</div>
 <div class="wrap">
   <div class="top">
     <div>
@@ -153,6 +178,12 @@ button.sm{background:none;border:1px solid var(--line);border-radius:10px;paddin
     <div id="list"></div>
   </section>
 
+  <section class="card" aria-label="Backup">
+    <h2>Back up your data</h2>
+    <p class="sub" style="margin-bottom:12px">Your data lives in this browser only. Save a backup file to keep it safe or to move it to another device.</p>
+    <div class="ctl"><button class="pri" id="exportbtn">Export backup</button><button class="sm" id="importbtn">Import backup</button><input type="file" id="importfile" accept=".json,application/json" hidden></div>
+  </section>
+
   <section class="card tips">
     <h2>How to use this</h2>
     <ul>
@@ -183,7 +214,7 @@ const today=ym+'-'+pad(now.getDate());
 let S=null;
 try{S=JSON.parse(localStorage.getItem('bp1'))}catch(e){}
 if(!S||!S.months)S={cur:'₱',months:{},ex:[]};
-function save(){try{localStorage.setItem('bp1',JSON.stringify(S))}catch(e){}cloudSave()}
+function save(){try{localStorage.setItem('bp1',JSON.stringify(S))}catch(e){}}
 S.bills=S.bills||[];S.goals=S.goals||[];S.loans=S.loans||[];S.pd=S.pd||[15,30];
 function normLoans(){S.loans.forEach(l=>{if(!l.pl)l.pl=l.p>0?[{d:l.d,a:l.p}]:[]})}
 normLoans();
@@ -364,34 +395,30 @@ $('loans').addEventListener('click',e=>{
     if(l&&v>0){const x=Math.min(v,l.a-l.p);l.p+=x;l.pl.push({d:today,a:x});save();render()}}
 });
 
-/* Cloud sync: private per-account copy, used only when signed in to Claude */
-var CLOUD=null,cTimer=null;
-function cloudSave(){
-  if(!CLOUD)return;
-  clearTimeout(cTimer);
-  cTimer=setTimeout(function(){try{CLOUD.set({json:JSON.stringify(S),t:Date.now()}).catch(function(){})}catch(e){}},800);
-}
-(async function(){
-  try{
-    if(!window.claude||!claude.use)return;
-    const db=await claude.use('db'),u=await claude.use('user');
-    if(!db||!u)return;
-    const id=await u.id();if(!id)return;
-    const ref=db.collection('data/users/'+id).doc('budget');
-    const snap=await ref.get();
-    if(snap.exists){
-      const d=snap.data();
-      if(d&&d.json){const c=JSON.parse(d.json);
-        if(c&&c.months){S=c;S.bills=S.bills||[];S.goals=S.goals||[];S.loans=S.loans||[];S.pd=S.pd||[15,30];S.ex=S.ex||[];normLoans();
-          try{localStorage.setItem('bp1',JSON.stringify(S))}catch(e){}
-          render();}}
-      CLOUD=ref;
-    }else{
-      CLOUD=ref;cloudSave();
-    }
-  }catch(e){}
-})();
+/* Backup: move your data between devices or browsers */
+$('exportbtn').addEventListener('click',()=>{
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([JSON.stringify(S)],{type:'application/json'}));
+  a.download='budget-backup-'+today+'.json';
+  document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+});
+$('importbtn').addEventListener('click',()=>$('importfile').click());
+$('importfile').addEventListener('change',e=>{
+  const f=e.target.files[0];if(!f)return;
+  const r=new FileReader();
+  r.onload=()=>{try{
+    const c=JSON.parse(r.result);
+    if(!c||!c.months||!Array.isArray(c.ex))throw 0;
+    if(!confirm('Replace everything in this planner with the backup?'))return;
+    S=c;S.bills=S.bills||[];S.goals=S.goals||[];S.loans=S.loans||[];S.pd=S.pd||[15,30];normLoans();save();render();
+  }catch(err){alert('That file is not a budget planner backup.')}};
+  r.readAsText(f);e.target.value='';
+});
 render();
+</script>
+<script>
+if('serviceWorker' in navigator){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{})})}
 </script>
 </body>
 </html>
